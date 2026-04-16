@@ -55,6 +55,7 @@ class AudioParam(
     }
 
 
+
     /**
      * Builder class to instantiate AudioParam with custom parameters
      */
@@ -271,5 +272,9 @@ class AudioParam(
                 playbackBoostInDb
             )
         }
+    }
+
+    override fun toString(): String {
+        return "AudioParam(audioSource=$audioSource, isUsingOpusCodec=$isUsingOpusCodec, sampleRate=$sampleRate, frameSize=$frameSize, channelSize=$channelSize, channelInConfig=$channelInConfig, channelOutConfig=$channelOutConfig, audioFormat=$audioFormat, bufferSizeFactor=$bufferSizeFactor, recordMinBufferSize=$recordMinBufferSize, playMinBufferSize=$playMinBufferSize, rawBufferSize=$rawBufferSize, framePerSent=$framePerSent, minDuration=$minDuration, maxDuration=$maxDuration, recordingBoostInDb=$recordingBoostInDb, receivingBoostInDb=$receivingBoostInDb, playbackBoostInDb=$playbackBoostInDb, resolution=$resolution)"
     }
 }

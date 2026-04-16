@@ -15,10 +15,12 @@ import com.smartwalkie.voicepingdemo.databinding.ActivityMainBinding
 import com.smartwalkie.voicepingsdk.ConnectionState
 import com.smartwalkie.voicepingsdk.VoicePing
 import com.smartwalkie.voicepingsdk.VoicePingButton
+import com.smartwalkie.voicepingsdk.VoicePingWavButton
 import com.smartwalkie.voicepingsdk.callback.ConnectCallback
 import com.smartwalkie.voicepingsdk.exception.ErrorCode
 import com.smartwalkie.voicepingsdk.listener.*
 import com.smartwalkie.voicepingsdk.model.Channel
+import java.io.File
 import java.nio.ByteBuffer
 
 class MainActivity : AppCompatActivity(), AdapterView.OnItemSelectedListener,
@@ -60,7 +62,9 @@ class MainActivity : AppCompatActivity(), AdapterView.OnItemSelectedListener,
         binding.editReceiverId.addTextChangedListener {
             val receiverId = it.toString()
             binding.voicePingButton.receiverId = receiverId
+            binding.wavPingButton.receiverId = receiverId
             binding.voicePingButton.setButtonEnabled(receiverId.isNotBlank())
+            binding.wavPingButton.setButtonEnabled(receiverId.isNotBlank())
         }
         binding.voicePingButton.listener = object : VoicePingButton.Listener {
             override fun onStarted() {
@@ -79,9 +83,33 @@ class MainActivity : AppCompatActivity(), AdapterView.OnItemSelectedListener,
                 }
             }
         }
+        binding.wavPingButton.listener = object : VoicePingWavButton.Listener {
+            override fun onStarted() {
+                log("WavPingButton, Wav PTT onStarted")
+            }
+
+            override fun onStopped() {
+                log("WavPingButton, Wav PTT onStopped")
+            }
+
+            override fun onError(errorMessage: String) {
+                log("WavPingButton, PTT error: $errorMessage")
+                val receiverId = binding.editReceiverId.text.toString().trim { it <= ' ' }
+                if (receiverId.isEmpty()) {
+                    binding.editReceiverId.error = getString(R.string.cannot_be_blank)
+                }
+            }
+        }
         VoicePing.setIncomingTalkListener(this)
         binding.voicePingButton.channelType = ChannelType.PRIVATE
+        binding.wavPingButton.channelType = ChannelType.PRIVATE
+
         binding.voicePingButton.setButtonEnabled(false)
+        binding.wavPingButton.setButtonEnabled(false)
+
+
+
+        binding.wavPingButton.wavFile = File(filesDir, "test.wav")
         updateConnectionState(VoicePing.getConnectionState())
         VoicePing.setConnectionStateListener(this)
         if (VoicePing.getConnectionState() == ConnectionState.DISCONNECTED) {
@@ -138,12 +166,14 @@ class MainActivity : AppCompatActivity(), AdapterView.OnItemSelectedListener,
                 channelType = ChannelType.GROUP
                 binding.layoutGroupButtons.visibility = View.VISIBLE
                 binding.voicePingButton.channelType = ChannelType.GROUP
+                binding.wavPingButton.channelType = ChannelType.GROUP
             }
             1 -> {
                 binding.textReceiverIdLabel.text = "Target User ID"
                 channelType = ChannelType.PRIVATE
                 binding.layoutGroupButtons.visibility = View.GONE
                 binding.voicePingButton.channelType = ChannelType.PRIVATE
+                binding.wavPingButton.channelType = ChannelType.PRIVATE
             }
         }
     }

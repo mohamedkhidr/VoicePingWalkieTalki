@@ -87,26 +87,26 @@ class VoicePingButton @JvmOverloads constructor(
         return false
     }
 
-    override fun onOutgoingTalkStarted(audioRecorder: AudioRecorder) {
+    override fun onOutgoingTalkStarted(audioSessionId: Int) {
         var nsEnabled = false
         var aecEnabled = false
         var agcEnabled = false
         if (NoiseSuppressor.isAvailable()) {
-            val noiseSuppressor = NoiseSuppressor.create(audioRecorder.audioSessionId)
+            val noiseSuppressor = NoiseSuppressor.create(audioSessionId)
             if (noiseSuppressor != null) {
                 noiseSuppressor.enabled = true
                 nsEnabled = true
             }
         }
         if (AcousticEchoCanceler.isAvailable()) {
-            val echoCanceler = AcousticEchoCanceler.create(audioRecorder.audioSessionId)
+            val echoCanceler = AcousticEchoCanceler.create(audioSessionId)
             if (echoCanceler != null) {
                 echoCanceler.enabled = true
                 aecEnabled = true
             }
         }
         if (AutomaticGainControl.isAvailable()) {
-            val automaticGainControl = AutomaticGainControl.create(audioRecorder.audioSessionId)
+            val automaticGainControl = AutomaticGainControl.create(audioSessionId)
             if (automaticGainControl != null) {
                 automaticGainControl.enabled = true
                 agcEnabled = true

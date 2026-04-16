@@ -9,6 +9,7 @@ import com.smartwalkie.voicepingsdk.listener.ConnectionStateListener
 import com.smartwalkie.voicepingsdk.listener.IncomingTalkListener
 import com.smartwalkie.voicepingsdk.listener.OutgoingTalkCallback
 import com.smartwalkie.voicepingsdk.model.AudioParam
+import java.io.File
 
 /**
  * Main class of VoicePing.
@@ -18,7 +19,7 @@ object VoicePing {
     private lateinit var audioParam: AudioParam
     private lateinit var player: Player
     private lateinit var connection: Connection
-    private lateinit var recorder: Recorder
+    private lateinit var sessionManager: SessionManager
 
     private var userId: String? = null
     private var company: String? = null
@@ -44,8 +45,8 @@ object VoicePing {
         voicePingThread.start()
         player = Player(context, audioParam, DEFAULT_SERVER_URL, voicePingThread.looper)
         connection = OkConnection(context, player, voicePingThread.looper)
-        recorder = Recorder(context, connection, audioParam, voicePingThread.looper)
-        connection.setOutgoingAudioListener(recorder)
+        sessionManager = SessionManager(context, connection, audioParam, voicePingThread.looper)
+        connection.setOutgoingAudioListener(sessionManager)
     }
 
     /**
@@ -79,7 +80,7 @@ object VoicePing {
             "${Build.MANUFACTURER}_${Build.MODEL}_${Build.FINGERPRINT}_${Build.BOOTLOADER}_${Build.DISPLAY}_${Build.HOST}"
         player.setServerUrl(realServerUrl)
         connection.connect(realServerUrl, getFullUserId(), deviceId, callback)
-        recorder.setUserId(getFullUserId())
+        sessionManager.setUserId(getFullUserId())
     }
 
     /**
@@ -128,7 +129,19 @@ object VoicePing {
      * @param callback    OutgoingTalkCallback
      */
     fun startTalking(receiverId: String, channelType: Int, callback: OutgoingTalkCallback?) {
-        recorder.startTalking(getFullId(receiverId), channelType, callback, null, null)
+        sessionManager.startTalking(getFullId(receiverId), channelType, callback, null, null)
+    }
+
+    /**
+     * Start PTT with wav file.
+     *
+     * @param receiverId  Receiver ID for private channel, or Group ID for group channel
+     * @param channelType ChannelType.PRIVATE or ChannelType.GROUP
+     * @param callback    OutgoingTalkCallback
+     * @param wavFile     WAV file
+     */
+    fun startTalkingWithWav(receiverId: String, channelType: Int, callback: OutgoingTalkCallback?, wavFile: File) {
+        sessionManager.startTalkingWithWav(getFullId(receiverId), channelType, callback, wavFile)
     }
 
     /**
@@ -146,7 +159,7 @@ object VoicePing {
         callback: OutgoingTalkCallback?,
         destinationPath: String?
     ) {
-        recorder.startTalking(getFullId(receiverId), channelType, callback, destinationPath, null)
+        sessionManager.startTalking(getFullId(receiverId), channelType, callback, destinationPath, null)
     }
 
     /**
@@ -167,7 +180,7 @@ object VoicePing {
         destinationPath: String?,
         recorder: CustomAudioRecorder?
     ) {
-        this.recorder.startTalking(
+        this.sessionManager.startTalking(
             getFullId(receiverId),
             channelType,
             callback,
@@ -180,7 +193,7 @@ object VoicePing {
      * Stop PTT Talk.
      */
     fun stopTalking() {
-        recorder.stopTalking()
+        sessionManager.stopTalking()
     }
 
     /**
@@ -213,7 +226,7 @@ object VoicePing {
     fun setAudioParam(audioParam: AudioParam) {
         this.audioParam = audioParam
         player.setAudioParam(audioParam)
-        recorder.setAudioParam(audioParam)
+        sessionManager.setAudioParam(audioParam)
     }
 
     /**

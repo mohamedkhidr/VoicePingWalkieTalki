@@ -111,7 +111,7 @@ class LoginActivity : AppCompatActivity(), PermissionCallbacks {
                         showProgress(false)
                         Toast.makeText(
                             this@LoginActivity,
-                            R.string.failed_to_sign_in,
+                            getString(R.string.failed_to_sign_in) + exception.message,
                             Toast.LENGTH_SHORT
                         ).show()
                     }

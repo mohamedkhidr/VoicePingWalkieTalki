@@ -11,7 +11,7 @@ interface OutgoingTalkCallback {
      *
      * @param audioRecorder AudioRecorder
      */
-    fun onOutgoingTalkStarted(audioRecorder: AudioRecorder)
+    fun onOutgoingTalkStarted(audioSessionId: Int)
 
     /**
      * Invoked after outgoing talk stopped.
