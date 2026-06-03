@@ -7,8 +7,11 @@ import com.smartwalkie.voicepingsdk.callback.ConnectCallback
 import com.smartwalkie.voicepingsdk.callback.DisconnectCallback
 import com.smartwalkie.voicepingsdk.listener.ConnectionStateListener
 import com.smartwalkie.voicepingsdk.listener.IncomingTalkListener
+import com.smartwalkie.voicepingsdk.listener.IncomingVideoListener
 import com.smartwalkie.voicepingsdk.listener.OutgoingTalkCallback
+import com.smartwalkie.voicepingsdk.listener.OutgoingVideoCallback
 import com.smartwalkie.voicepingsdk.model.AudioParam
+import com.smartwalkie.voicepingsdk.model.VideoParam
 import java.io.File
 
 /**
@@ -18,6 +21,7 @@ object VoicePing {
     private const val DEFAULT_SERVER_URL: String = "wss://router-lite.voiceping.info"
     private lateinit var audioParam: AudioParam
     private lateinit var player: Player
+    private lateinit var videoPlayer: VideoPlayer
     private lateinit var connection: Connection
     private lateinit var sessionManager: SessionManager
 
@@ -44,6 +48,8 @@ object VoicePing {
         val voicePingThread = HandlerThread("VoicePingThread", Thread.MAX_PRIORITY)
         voicePingThread.start()
         player = Player(context, audioParam, DEFAULT_SERVER_URL, voicePingThread.looper)
+        videoPlayer = VideoPlayer(voicePingThread.looper)
+        player.setVideoPlayer(videoPlayer)
         connection = OkConnection(context, player, voicePingThread.looper)
         sessionManager = SessionManager(context, connection, audioParam, voicePingThread.looper)
         connection.setOutgoingAudioListener(sessionManager)
@@ -194,6 +200,48 @@ object VoicePing {
      */
     fun stopTalking() {
         sessionManager.stopTalking()
+    }
+
+    /**
+     * Start push-to-talk video session. Opens the camera (Camera2), encodes H.264 via
+     * MediaCodec, and streams VIDEO_FRAME messages over the existing WebSocket.
+     * Requires android.permission.CAMERA at runtime (API 21+).
+     *
+     * @param receiverId  Receiver ID (private) or Group ID (group)
+     * @param channelType ChannelType.PRIVATE or ChannelType.GROUP
+     * @param callback    OutgoingVideoCallback
+     */
+    fun startVideoTalking(receiverId: String, channelType: Int, callback: OutgoingVideoCallback?) {
+        sessionManager.startVideoTalking(getFullId(receiverId), channelType, callback)
+    }
+
+    /**
+     * Start push-to-talk video session with custom VideoParam.
+     */
+    fun startVideoTalking(
+        receiverId: String,
+        channelType: Int,
+        videoParam: VideoParam,
+        callback: OutgoingVideoCallback?
+    ) {
+        sessionManager.setVideoParam(videoParam)
+        sessionManager.startVideoTalking(getFullId(receiverId), channelType, callback)
+    }
+
+    /**
+     * Stop the active video PTT session.
+     */
+    fun stopVideoTalking() {
+        sessionManager.stopVideoTalking()
+    }
+
+    /**
+     * Set a listener for incoming video PTT sessions.
+     * The listener's [IncomingVideoListener.onIncomingVideoStarted] must return the
+     * [android.view.Surface] to render decoded video into.
+     */
+    fun setIncomingVideoListener(listener: IncomingVideoListener?) {
+        videoPlayer.setIncomingVideoListener(listener)
     }
 
     /**

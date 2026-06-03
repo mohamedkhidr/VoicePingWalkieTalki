@@ -68,7 +68,8 @@ class MessageHelper {
 
                 if (message.getMessageType() == MessageType.START_TALKING) {
                     message.setDuration(unpacker.readLong());
-                } else if (message.getMessageType() == MessageType.AUDIO) {
+                } else if (message.getMessageType() == MessageType.AUDIO
+                        || message.getMessageType() == MessageType.VIDEO_FRAME) {
                     message.setPayload(unpacker.readByteArray());
                     message.addData(message.getPayload());
                 } else if (message.getMessageType() == MessageType.OFFLINE_MESSAGE) {
@@ -234,6 +235,23 @@ class MessageHelper {
             message.setReceiverId(receiverId);
             message.setPayload(out.toByteArray());
 
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return out.toByteArray();
+    }
+
+    public static byte[] createVideoFrameMessage(String senderId, String receiverId, int channelType, byte[] payload) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Packer packer = mMessagePack.createPacker(out);
+        try {
+            packer.writeArrayBegin(5);
+            packer.write(channelType);
+            packer.write(MessageType.VIDEO_FRAME);
+            packer.write(senderId);
+            packer.write(receiverId);
+            packer.write(payload);
+            packer.writeArrayEnd(true);
         } catch (IOException e) {
             e.printStackTrace();
         }

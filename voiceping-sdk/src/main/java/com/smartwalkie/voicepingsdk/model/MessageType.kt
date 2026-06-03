@@ -25,6 +25,7 @@ object MessageType {
     const val MESSAGE_READ = 21
     const val ACK_TEXT = 22
     const val UNAUTHORIZED_GROUP = 27
+    const val VIDEO_FRAME = 28
 
     @JvmStatic
     fun getText(messageType: Int): String {
@@ -52,6 +53,7 @@ object MessageType {
             MESSAGE_READ -> "MESSAGE_READ"
             ACK_TEXT -> "ACK_TEXT"
             UNAUTHORIZED_GROUP -> "UNAUTHORIZED_GROUP"
+            VIDEO_FRAME -> "VIDEO_FRAME"
             else -> "UNKNOWN"
         }
     }

@@ -40,6 +40,7 @@ class Player implements IncomingAudioListener {
     private IncomingTalkListener mIncomingTalkListener;
     private final PlayerMuteManager mPlayerMuteManager;
     private final Map<String, IncomingTalkSession> mActiveSessions;
+    private VideoPlayer mVideoPlayer;
 
     private final int PLAY = 1;
     private final int STOP = 2;
@@ -158,6 +159,10 @@ class Player implements IncomingAudioListener {
 
     public void setIncomingTalkListener(IncomingTalkListener listener) {
         mIncomingTalkListener = listener;
+    }
+
+    public void setVideoPlayer(VideoPlayer videoPlayer) {
+        mVideoPlayer = videoPlayer;
     }
 
     public void mute(String targetId, int channelType) {
@@ -289,10 +294,14 @@ class Player implements IncomingAudioListener {
                 mBackgroundHandler.removeCallbacks(session.getTimeoutCheckRunner());
                 mBackgroundHandler.postDelayed(session.getTimeoutCheckRunner(), 5000);
                 break;
+            case MessageType.VIDEO_FRAME:
+                if (mVideoPlayer != null) mVideoPlayer.onVideoFrameReceived(message);
+                break;
             case MessageType.STOP_TALKING:
 //                Log.d(TAG, "onStopTalkingMessage, message: " + message.toString());
 //                Log.d(TAG, "onStopTalkingMessage, ack id: " + message.getAckIds());
                 stopPlaying(channel, message);
+                if (mVideoPlayer != null) mVideoPlayer.onStopTalkingReceived(message);
                 break;
         }
     }

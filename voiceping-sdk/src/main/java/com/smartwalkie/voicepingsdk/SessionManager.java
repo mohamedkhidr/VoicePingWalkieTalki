@@ -14,10 +14,12 @@ import com.smartwalkie.voicepingsdk.exception.VoicePingException;
 import com.smartwalkie.voicepingsdk.listener.AudioInterceptor;
 import com.smartwalkie.voicepingsdk.listener.OutgoingAudioListener;
 import com.smartwalkie.voicepingsdk.listener.OutgoingTalkCallback;
+import com.smartwalkie.voicepingsdk.listener.OutgoingVideoCallback;
 import com.smartwalkie.voicepingsdk.model.AudioParam;
 import com.smartwalkie.voicepingsdk.model.Channel;
 import com.smartwalkie.voicepingsdk.model.Message;
 import com.smartwalkie.voicepingsdk.model.MessageType;
+import com.smartwalkie.voicepingsdk.model.VideoParam;
 import com.smartwalkie.voicepingsdk.model.WavMetadata;
 
 import java.io.File;
@@ -50,6 +52,15 @@ public class SessionManager implements OutgoingAudioListener{
     private AudioSender mAudioSender;
     private AudioLocalSaver mAudioLocalSaver;
 
+    // Video PTT fields
+    private VideoEncoder mVideoEncoder;
+    private VideoSender mVideoSender;
+    private VideoParam mVideoParam;
+    private OutgoingVideoCallback mOutgoingVideoCallback;
+    private volatile long mVideoStartTime;
+    private volatile boolean mIsVideoSession;
+    private Runnable mStartVideoTalkingRunner;
+
     private static final int ACK_TIMEOUT_IN_MILLIS = 10 * 1000;
 
 
@@ -81,12 +92,22 @@ public class SessionManager implements OutgoingAudioListener{
         @Override
         public void run() {
             Log.d(TAG, "ACK_START Timeout!");
-            stopRecording();
-            if (mOutgoingTalkCallback != null) {
-                mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
-                        "ACK_START Timeout. Failed to initiate PTT Talk!",
-                        ErrorCode.ACK_START_TIMEOUT));
-                mOutgoingTalkCallback = null;
+            if (mIsVideoSession) {
+                stopVideoEncoder();
+                if (mOutgoingVideoCallback != null) {
+                    mOutgoingVideoCallback.onOutgoingVideoError(new VoicePingException(
+                            "ACK_START Timeout. Failed to initiate Video PTT!",
+                            ErrorCode.ACK_START_TIMEOUT));
+                    mOutgoingVideoCallback = null;
+                }
+            } else {
+                stopRecording();
+                if (mOutgoingTalkCallback != null) {
+                    mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
+                            "ACK_START Timeout. Failed to initiate PTT Talk!",
+                            ErrorCode.ACK_START_TIMEOUT));
+                    mOutgoingTalkCallback = null;
+                }
             }
         }
     };
@@ -96,12 +117,21 @@ public class SessionManager implements OutgoingAudioListener{
         public void run() {
             Log.d(TAG, "ACK_END Timeout!");
             if (mIsRecording) return;
-            stopRecording();
-            if (mOutgoingTalkCallback != null) {
-                mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
-                        "ACK_END Timeout. Failed to get download url!",
-                        ErrorCode.ACK_END_TIMEOUT));
-                mOutgoingTalkCallback = null;
+            if (mIsVideoSession) {
+                if (mOutgoingVideoCallback != null) {
+                    mOutgoingVideoCallback.onOutgoingVideoError(new VoicePingException(
+                            "ACK_END Timeout.",
+                            ErrorCode.ACK_END_TIMEOUT));
+                    mOutgoingVideoCallback = null;
+                }
+            } else {
+                stopRecording();
+                if (mOutgoingTalkCallback != null) {
+                    mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
+                            "ACK_END Timeout. Failed to get download url!",
+                            ErrorCode.ACK_END_TIMEOUT));
+                    mOutgoingTalkCallback = null;
+                }
             }
         }
     };
@@ -279,6 +309,96 @@ public class SessionManager implements OutgoingAudioListener{
         sendAckStop();
     }
 
+    // ── Video PTT ─────────────────────────────────────────────────────────────
+
+    public void setVideoParam(VideoParam videoParam) {
+        mVideoParam = videoParam;
+    }
+
+    public void startVideoTalking(String receiverId, int channelType,
+                                   OutgoingVideoCallback callback) {
+        if (!NetworkUtil.isNetworkConnected(mContext)) {
+            callback.onOutgoingVideoError(new VoicePingException(
+                    "Please check your internet connection!",
+                    ErrorCode.INTERNET_DISCONNECTED));
+            return;
+        }
+        if (mConnection.getConnectionState() == ConnectionState.DISCONNECTED) {
+            callback.onOutgoingVideoError(new VoicePingException(
+                    "You are disconnected!", ErrorCode.SOCKET_DISCONNECTED));
+            return;
+        }
+
+        mReceiverId = receiverId;
+        mChannelType = channelType;
+        mOutgoingVideoCallback = callback;
+        mIsVideoSession = true;
+        mIsRecording = true;
+
+        VideoParam param = mVideoParam != null ? mVideoParam : new VideoParam.Builder().build();
+        mVideoSender = new VideoSender(mConnection, mUserId, receiverId, channelType);
+        mVideoEncoder = new VideoEncoder(mContext, param);
+
+        mBackgroundHandler.removeCallbacksAndMessages(null);
+
+        long diffFromLast = System.currentTimeMillis() - mVideoStartTime;
+        mStartVideoTalkingRunner = () -> {
+            sendAckStart();
+            mVideoStartTime = System.currentTimeMillis();
+            mVideoEncoder.start(new VideoEncoder.FrameCallback() {
+                @Override
+                public void onFrameEncoded(byte[] data, boolean isKeyFrame) {
+                    long duration = System.currentTimeMillis() - mVideoStartTime;
+                    if (duration > param.getMaxDuration()) {
+                        mBackgroundHandler.post(() -> stopVideoTalking());
+                        return;
+                    }
+                    mVideoSender.send(data, isKeyFrame);
+                }
+
+                @Override
+                public void onError(Exception e) {
+                    if (mOutgoingVideoCallback != null) {
+                        mOutgoingVideoCallback.onOutgoingVideoError(
+                                new VoicePingException(e.getMessage(), ErrorCode.UNKNOWN));
+                    }
+                }
+            });
+            if (mOutgoingVideoCallback != null) mOutgoingVideoCallback.onOutgoingVideoStarted();
+        };
+
+        if (diffFromLast < 500) {
+            mBackgroundHandler.postDelayed(mStartVideoTalkingRunner, diffFromLast);
+        } else {
+            mStartVideoTalkingRunner.run();
+        }
+    }
+
+    public void stopVideoTalking() {
+        Log.d(TAG, "stopVideoTalking at: " + System.currentTimeMillis());
+        mBackgroundHandler.removeCallbacks(mStartVideoTalkingRunner);
+        stopVideoEncoder();
+
+        if (mOutgoingVideoCallback != null) {
+            long duration = System.currentTimeMillis() - mVideoStartTime;
+            int minDur = mVideoParam != null ? mVideoParam.getMinDuration() : 300;
+            int maxDur = mVideoParam != null ? mVideoParam.getMaxDuration() : 60_000;
+            mOutgoingVideoCallback.onOutgoingVideoStopped(
+                    duration < minDur, duration > maxDur);
+        }
+
+        sendAckStop();
+    }
+
+    private void stopVideoEncoder() {
+        mIsRecording = false;
+        mIsVideoSession = false;
+        if (mVideoEncoder != null) {
+            mVideoEncoder.stop();
+            mVideoEncoder = null;
+        }
+    }
+
     // Expose encoder interceptors (same API surface as before on AudioRecorder interface)
     public void setInterceptorBeforeEncoded(AudioInterceptor interceptor) {
         if (mAudioEncoder != null) mAudioEncoder.setInterceptorBeforeEncoded(interceptor);
@@ -348,18 +468,31 @@ public class SessionManager implements OutgoingAudioListener{
 
             case MessageType.ACK_START_FAILED:
                 mBackgroundHandler.removeCallbacks(mAckStartTimeoutCheckRunner);
-                stopRecording();
-                if (mOutgoingTalkCallback != null) {
-                    mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
-                            "ACK_START_FAILED. Failed to initiate PTT Talk!",
-                            ErrorCode.ACK_START_FAILED));
-                    mOutgoingTalkCallback = null;
+                if (mIsVideoSession) {
+                    stopVideoEncoder();
+                    if (mOutgoingVideoCallback != null) {
+                        mOutgoingVideoCallback.onOutgoingVideoError(new VoicePingException(
+                                "ACK_START_FAILED. Failed to initiate Video PTT!",
+                                ErrorCode.ACK_START_FAILED));
+                        mOutgoingVideoCallback = null;
+                    }
+                } else {
+                    stopRecording();
+                    if (mOutgoingTalkCallback != null) {
+                        mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
+                                "ACK_START_FAILED. Failed to initiate PTT Talk!",
+                                ErrorCode.ACK_START_FAILED));
+                        mOutgoingTalkCallback = null;
+                    }
                 }
                 break;
 
             case MessageType.ACK_END:
                 mBackgroundHandler.removeCallbacks(mAckEndTimeoutCheckRunner);
-                if (!mIsRecording && mOutgoingTalkCallback != null) {
+                if (!mIsRecording && mIsVideoSession) {
+                    // Video PTT — no recording download URL
+                    mOutgoingVideoCallback = null;
+                } else if (!mIsRecording && mOutgoingTalkCallback != null) {
                     String serverUrl = mConnection.getServerUrl();
                     if (serverUrl == null) break;
                     if (serverUrl.startsWith("ws")) {
@@ -382,12 +515,22 @@ public class SessionManager implements OutgoingAudioListener{
 
             case MessageType.UNAUTHORIZED_GROUP:
                 mBackgroundHandler.removeCallbacks(mAckStartTimeoutCheckRunner);
-                stopRecording();
-                if (mOutgoingTalkCallback != null) {
-                    mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
-                            "UNAUTHORIZED_GROUP. Failed to initiate PTT Talk!",
-                            ErrorCode.UNAUTHORIZED_GROUP));
-                    mOutgoingTalkCallback = null;
+                if (mIsVideoSession) {
+                    stopVideoEncoder();
+                    if (mOutgoingVideoCallback != null) {
+                        mOutgoingVideoCallback.onOutgoingVideoError(new VoicePingException(
+                                "UNAUTHORIZED_GROUP. Failed to initiate Video PTT!",
+                                ErrorCode.UNAUTHORIZED_GROUP));
+                        mOutgoingVideoCallback = null;
+                    }
+                } else {
+                    stopRecording();
+                    if (mOutgoingTalkCallback != null) {
+                        mOutgoingTalkCallback.onOutgoingTalkError(new VoicePingException(
+                                "UNAUTHORIZED_GROUP. Failed to initiate PTT Talk!",
+                                ErrorCode.UNAUTHORIZED_GROUP));
+                        mOutgoingTalkCallback = null;
+                    }
                 }
                 break;
         }

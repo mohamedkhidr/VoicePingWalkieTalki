@@ -201,6 +201,7 @@ class OkConnection implements Connection {
     private boolean isIncomingMessageType(int messageType) {
         return messageType == MessageType.START_TALKING
                 || messageType == MessageType.AUDIO
+                || messageType == MessageType.VIDEO_FRAME
                 || messageType == MessageType.STOP_TALKING;
     }
 
