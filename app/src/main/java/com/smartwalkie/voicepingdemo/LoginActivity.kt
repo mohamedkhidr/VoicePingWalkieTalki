@@ -98,22 +98,28 @@ class LoginActivity : AppCompatActivity(), PermissionCallbacks {
                 VoicePing.connect(serverUrl, userId, company, object : ConnectCallback {
                     override fun onConnected() {
                         Log.v(TAG, "onConnected")
-                        showProgress(false)
-                        MyPrefs.userId = userId
-                        MyPrefs.company = company
-                        MyPrefs.serverUrl = serverUrl
-                        startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                        finish()
+                        runOnUiThread {
+                            if (isFinishing) return@runOnUiThread
+                            showProgress(false)
+                            MyPrefs.userId = userId
+                            MyPrefs.company = company
+                            MyPrefs.serverUrl = serverUrl
+                            startActivity(Intent(this@LoginActivity, MainActivity::class.java))
+                            finish()
+                        }
                     }
 
                     override fun onFailed(exception: VoicePingException) {
                         Log.v(TAG, "onFailed")
-                        showProgress(false)
-                        Toast.makeText(
-                            this@LoginActivity,
-                            getString(R.string.failed_to_sign_in) + exception.message,
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        runOnUiThread {
+                            if (isFinishing) return@runOnUiThread
+                            showProgress(false)
+                            Toast.makeText(
+                                this@LoginActivity,
+                                getString(R.string.failed_to_sign_in) + exception.message,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 })
             }
