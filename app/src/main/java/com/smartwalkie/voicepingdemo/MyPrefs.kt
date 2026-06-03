@@ -15,7 +15,7 @@ object MyPrefs {
     private const val KEY_COMPANY = "company"
     private const val KEY_SERVER_URL = "server_url"
 
-    private const val DEFAULT_SERVER_URL = "wss://router-lite.voiceping.info"
+    private const val DEFAULT_SERVER_URL = "ws://141.95.35.139:43010"
 
     private val prefs: SharedPreferences by lazy {
         VoicePingClientApp.appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
