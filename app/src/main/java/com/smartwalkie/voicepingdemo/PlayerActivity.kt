@@ -1,42 +1,53 @@
 package com.smartwalkie.voicepingdemo
 
-import androidx.appcompat.app.AppCompatActivity
-import android.widget.SeekBar
-import com.smartwalkie.voicepingsdk.VoicePingPlayer
-import android.content.Intent
-import android.widget.Toast
-import android.os.Bundle
-import android.widget.SeekBar.OnSeekBarChangeListener
 import android.content.Context
+import android.content.Intent
+import android.os.Bundle
 import android.util.Log
+import android.widget.SeekBar
+import android.widget.SeekBar.OnSeekBarChangeListener
+import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import com.smartwalkie.voicepingdemo.databinding.ActivityPlayerBinding
 import com.smartwalkie.voicepingsdk.VoicePing
+import com.smartwalkie.voicepingsdk.VoicePingPlayer
 import java.io.File
 import java.io.FileNotFoundException
-import java.util.*
+import java.util.Locale
+import java.util.Timer
+import java.util.TimerTask
 
 class PlayerActivity : AppCompatActivity() {
-    private val TAG = "PlayerActivity"
-    private val RC_PICK_FILE = 100
+
     private lateinit var binding: ActivityPlayerBinding
 
-    private var mFilePath: String? = null
-    private var mVoicePingPlayer: VoicePingPlayer? = null
-    private var mTimer: Timer? = null
+    private var filePath: String? = null
+    private var voicePingPlayer: VoicePingPlayer? = null
+    private var progressTimer: Timer? = null
+
+    private val pickFileLauncher: ActivityResultLauncher<Array<String>> =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                filePath = uri.path
+                binding.filePath.text = filePath
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        mFilePath = intent.getStringExtra(FILE_PATH_DATA)
-        if (mFilePath.isNullOrEmpty()) {
+        filePath = intent.getStringExtra(FILE_PATH_DATA)
+        if (filePath.isNullOrEmpty()) {
             showToast("You need to do PTT call first!")
             finish()
             return
         }
 
-        binding.filePath.text = mFilePath
+        binding.filePath.text = filePath
         binding.pickFileButton.setOnClickListener { pickFile() }
         binding.playButton.setOnClickListener { playAudio() }
         binding.pauseButton.setOnClickListener { pauseAudio() }
@@ -48,99 +59,106 @@ class PlayerActivity : AppCompatActivity() {
         initPlayer()
     }
 
+    override fun onStop() {
+        super.onStop()
+        cancelTimer()
+        voicePingPlayer?.stop()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cancelTimer()
+        voicePingPlayer = null
+    }
+
     private fun initPlayer() {
         val audioParam = VoicePing.getAudioParam()
-        val bufferSize = if (audioParam.isUsingOpusCodec) 133 else audioParam.rawBufferSize
-        mVoicePingPlayer = VoicePingPlayer(audioParam, bufferSize)
+        val bufferSize = if (audioParam.isUsingOpusCodec) OPUS_PLAYBACK_BUFFER else audioParam.rawBufferSize
+        val player = VoicePingPlayer(audioParam, bufferSize)
+        voicePingPlayer = player
         try {
-            mVoicePingPlayer?.setDataSource(mFilePath)
-            mVoicePingPlayer?.prepare()
-            binding.seekBar.max = mVoicePingPlayer?.duration?.toInt() ?: 0
-            binding.timeDuration.text = getTimeFromMillis(mVoicePingPlayer?.duration ?: 0)
+            player.setDataSource(filePath)
+            player.prepare()
+            val duration = player.duration
+            binding.seekBar.max = duration.toInt()
+            binding.timeDuration.text = formatTime(duration)
             binding.seekBar.setOnSeekBarChangeListener(object : OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar, i: Int, b: Boolean) {}
-                override fun onStartTrackingTouch(seekBar: SeekBar) {}
+                override fun onProgressChanged(seekBar: SeekBar, i: Int, b: Boolean) = Unit
+                override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
                 override fun onStopTrackingTouch(seekBar: SeekBar) {
                     log("progress updated to: ${seekBar.progress}")
-                    mVoicePingPlayer?.seekTo(seekBar.progress.toLong())
+                    voicePingPlayer?.seekTo(seekBar.progress.toLong())
                 }
             })
-            mVoicePingPlayer?.setOnPlaybackStartedListener { audioSessionId ->
+            player.setOnPlaybackStartedListener { audioSessionId ->
                 log("OnPlaybackStartedListener, session id: $audioSessionId")
             }
-            mVoicePingPlayer?.setOnCompletionListener {
+            player.setOnCompletionListener {
                 VoicePing.unmuteAll()
-                mTimer?.cancel()
-                binding.seekBar.progress = mVoicePingPlayer?.duration?.toInt() ?: 0
-                binding.timeProgress.text = getTimeFromMillis(mVoicePingPlayer?.duration ?: 0)
+                cancelTimer()
+                val total = voicePingPlayer?.duration ?: 0L
+                binding.seekBar.progress = total.toInt()
+                binding.timeProgress.text = formatTime(total)
                 showToast("Playback Completed!")
             }
         } catch (e: FileNotFoundException) {
-            e.printStackTrace()
+            Log.w(TAG, "file not found: $filePath", e)
+            showToast("File not found!")
         }
-    }
-
-    private fun getTimeFromMillis(millis: Long): String {
-        val secs = Math.round((millis / 1000).toFloat())
-        val timeMins = secs / 60
-        val timeSecs = secs % 60
-        return String.format(Locale.US, "%02d:%02d", timeMins, timeSecs)
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == RC_PICK_FILE && resultCode == RESULT_OK && data != null) {
-            val uri = data.data
-            mFilePath = uri?.path
-            binding.filePath.text = mFilePath
-        }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        mVoicePingPlayer?.stop()
-    }
-
-    private fun pickFile() {
-        val intent = Intent(Intent.ACTION_GET_CONTENT)
-        intent.type = "file/*"
-        startActivityForResult(intent, RC_PICK_FILE)
     }
 
     private fun playAudio() {
         log("playAudio")
-        if (mVoicePingPlayer == null) return
-        val file = File(mFilePath)
-        if (!file.exists()) {
+        val player = voicePingPlayer ?: return
+        val path = filePath
+        if (path == null || !File(path).exists()) {
             showToast("File not exist!")
             return
         }
         VoicePing.muteAll()
-        mVoicePingPlayer?.start()
-        mTimer = Timer()
-        mTimer?.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                runOnUiThread {
-                    binding.seekBar.progress = mVoicePingPlayer?.currentPosition?.toInt() ?: 0
-                    binding.timeProgress.text =
-                        getTimeFromMillis(mVoicePingPlayer?.currentPosition ?: 0)
-                }
-            }
-        }, 0, 500)
+        player.start()
+        startProgressTimer()
     }
 
     private fun pauseAudio() {
         log("pauseAudio")
         VoicePing.unmuteAll()
-        mVoicePingPlayer?.pause()
-        mTimer?.cancel()
+        voicePingPlayer?.pause()
+        cancelTimer()
     }
 
     private fun stopAudio() {
         log("stopAudio")
         VoicePing.unmuteAll()
-        mVoicePingPlayer?.stop()
-        mTimer?.cancel()
+        voicePingPlayer?.stop()
+        cancelTimer()
+    }
+
+    private fun startProgressTimer() {
+        cancelTimer()
+        progressTimer = Timer("VpPlayerProgress", /* isDaemon = */ true).also { timer ->
+            timer.scheduleAtFixedRate(object : TimerTask() {
+                override fun run() {
+                    val pos = voicePingPlayer?.currentPosition ?: 0L
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        binding.seekBar.progress = pos.toInt()
+                        binding.timeProgress.text = formatTime(pos)
+                    }
+                }
+            }, 0L, PROGRESS_INTERVAL_MS)
+        }
+    }
+
+    private fun cancelTimer() {
+        progressTimer?.cancel()
+        progressTimer = null
+    }
+
+    private fun pickFile() {
+        // Use the modern Activity Result API. Match audio MIME types; the
+        // legacy "file/*" was invalid and showed nothing on most devices.
+        pickFileLauncher.launch(arrayOf("audio/*", "application/octet-stream"))
     }
 
     private fun showToast(message: String) {
@@ -152,12 +170,23 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val TAG = "PlayerActivity"
         private const val FILE_PATH_DATA = "file_path_data"
+        private const val PROGRESS_INTERVAL_MS = 500L
+        // Original magic constant — playback buffer used when Opus codec is on.
+        private const val OPUS_PLAYBACK_BUFFER = 133
 
-        fun generateIntent(context: Context?, filePath: String?): Intent {
-            val intent = Intent(context, PlayerActivity::class.java)
-            intent.putExtra(FILE_PATH_DATA, filePath)
-            return intent
+        @JvmStatic
+        fun generateIntent(context: Context?, filePath: String?): Intent =
+            Intent(context, PlayerActivity::class.java).apply {
+                putExtra(FILE_PATH_DATA, filePath)
+            }
+
+        private fun formatTime(millis: Long): String {
+            val totalSeconds = ((millis + 500) / 1000).toInt()  // half-up rounding
+            val mins = totalSeconds / 60
+            val secs = totalSeconds % 60
+            return String.format(Locale.US, "%02d:%02d", mins, secs)
         }
     }
 }
