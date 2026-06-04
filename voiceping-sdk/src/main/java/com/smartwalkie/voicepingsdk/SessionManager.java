@@ -399,6 +399,66 @@ public class SessionManager implements OutgoingAudioListener{
         }
     }
 
+    // ── Video session API (app manages camera+encoder, SDK handles signaling) ─
+
+    /** Start a video PTT session. SDK sends START_TALKING and waits for ACK. */
+    public void startVideoSession(String receiverId, int channelType,
+                                  OutgoingVideoCallback callback) {
+        if (!NetworkUtil.isNetworkConnected(mContext)) {
+            if (callback != null) callback.onOutgoingVideoError(new VoicePingException(
+                    "Please check your internet connection!", ErrorCode.INTERNET_DISCONNECTED));
+            return;
+        }
+        if (mConnection.getConnectionState() == ConnectionState.DISCONNECTED) {
+            if (callback != null) callback.onOutgoingVideoError(new VoicePingException(
+                    "You are disconnected!", ErrorCode.SOCKET_DISCONNECTED));
+            return;
+        }
+
+        mReceiverId = receiverId;
+        mChannelType = channelType;
+        mOutgoingVideoCallback = callback;
+        mIsVideoSession = true;
+        mIsRecording = true;
+        mVideoSender = new VideoSender(mConnection, mUserId, receiverId, channelType);
+
+        mBackgroundHandler.removeCallbacksAndMessages(null);
+        long diff = System.currentTimeMillis() - mVideoStartTime;
+        mStartVideoTalkingRunner = () -> {
+            sendAckStart();
+            mVideoStartTime = System.currentTimeMillis();
+            if (mOutgoingVideoCallback != null) mOutgoingVideoCallback.onOutgoingVideoStarted();
+        };
+        if (diff < 500) {
+            mBackgroundHandler.postDelayed(mStartVideoTalkingRunner, diff);
+        } else {
+            mStartVideoTalkingRunner.run();
+        }
+    }
+
+    /** Send an encoded H.264 frame over the active video session. */
+    public void sendVideoFrame(byte[] data, boolean isKeyFrame) {
+        if (mVideoSender != null && mIsVideoSession) {
+            mVideoSender.send(data, isKeyFrame);
+        }
+    }
+
+    /** Stop the active video session. SDK sends STOP_TALKING. */
+    public void stopVideoSession() {
+        mBackgroundHandler.removeCallbacks(mStartVideoTalkingRunner);
+        mIsRecording = false;
+        mIsVideoSession = false;
+
+        if (mOutgoingVideoCallback != null) {
+            long duration = System.currentTimeMillis() - mVideoStartTime;
+            int minDur = mVideoParam != null ? mVideoParam.getMinDuration() : 300;
+            int maxDur = mVideoParam != null ? mVideoParam.getMaxDuration() : 60_000;
+            mOutgoingVideoCallback.onOutgoingVideoStopped(duration < minDur, duration > maxDur);
+            mOutgoingVideoCallback = null;
+        }
+        sendAckStop();
+    }
+
     // Expose encoder interceptors (same API surface as before on AudioRecorder interface)
     public void setInterceptorBeforeEncoded(AudioInterceptor interceptor) {
         if (mAudioEncoder != null) mAudioEncoder.setInterceptorBeforeEncoded(interceptor);

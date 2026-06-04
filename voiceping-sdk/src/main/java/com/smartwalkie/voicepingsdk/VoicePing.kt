@@ -245,6 +245,29 @@ object VoicePing {
     }
 
     /**
+     * Start a video session where the caller manages Camera2 + MediaCodec.
+     * The SDK handles only signaling (START_TALKING / ACK / STOP_TALKING).
+     * Feed each encoded H.264 frame via [sendVideoFrame], then call [stopVideoSession].
+     */
+    fun startVideoSession(receiverId: String, channelType: Int, callback: OutgoingVideoCallback?) {
+        sessionManager.startVideoSession(getFullId(receiverId), channelType, callback)
+    }
+
+    /**
+     * Send one encoded H.264 frame during an active video session started with [startVideoSession].
+     */
+    fun sendVideoFrame(data: ByteArray, isKeyFrame: Boolean) {
+        sessionManager.sendVideoFrame(data, isKeyFrame)
+    }
+
+    /**
+     * Stop the video session started with [startVideoSession].
+     */
+    fun stopVideoSession() {
+        sessionManager.stopVideoSession()
+    }
+
+    /**
      * Join a group channel.
      *
      * @param groupId Group ID
