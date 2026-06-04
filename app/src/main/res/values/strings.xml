@@ -20,4 +20,7 @@
     <string name="play">Play</string>
     <string name="pause">Pause</string>
     <string name="stop">Stop</string>
+
+    <string name="hold_for_video_ptt">Hold for Video PTT</string>
+    <string name="incoming_video">Incoming Video</string>
 </resources>

@@ -143,7 +143,56 @@
             android:layout_height="100dp"
             android:layout_marginTop="16dp" />
 
+        <Button
+            android:id="@+id/button_video_ptt"
+            android:layout_width="match_parent"
+            android:layout_height="100dp"
+            android:layout_marginTop="16dp"
+            android:enabled="false"
+            android:text="@string/hold_for_video_ptt" />
+
     </LinearLayout>
+
+    <!-- Incoming video overlay — full-screen, shown while a video PTT is received -->
+    <FrameLayout
+        android:id="@+id/layout_incoming_video"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:visibility="gone">
+
+        <SurfaceView
+            android:id="@+id/surface_incoming_video"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="16dp"
+            android:background="#88000000"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/incoming_video"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/text_incoming_video_sender_id"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
     <LinearLayout
         android:id="@+id/layout_incoming_talk"

@@ -10,11 +10,15 @@ import android.os.Bundle
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.Surface
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.widget.addTextChangedListener
 import com.smartwalkie.voicepingdemo.databinding.ActivityMainBinding
@@ -31,11 +35,15 @@ import com.smartwalkie.voicepingsdk.listener.AudioMetaData
 import com.smartwalkie.voicepingsdk.listener.AudioReceiver
 import com.smartwalkie.voicepingsdk.listener.ConnectionStateListener
 import com.smartwalkie.voicepingsdk.listener.IncomingTalkListener
+import com.smartwalkie.voicepingsdk.listener.IncomingVideoListener
+import com.smartwalkie.voicepingsdk.listener.OutgoingVideoCallback
 import com.smartwalkie.voicepingsdk.model.Channel
 import com.smartwalkie.voicepingsdk.model.ChannelType
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity(),
     AdapterView.OnItemSelectedListener,
@@ -64,6 +72,11 @@ class MainActivity : AppCompatActivity(),
     // while it's already healthy.
     private lateinit var networkMonitor: NetworkMonitor
     @Volatile private var sawNetworkLoss: Boolean = false
+
+    // Video PTT — incoming surface tracking
+    @Volatile private var incomingVideoSurface: Surface? = null
+    @Volatile private var videoSurfaceLatch: CountDownLatch? = null
+    private var isVideoTalking = false
 
     private val kpi: PttKpiLogger? get() = PttKpiLogger.get()
 
@@ -109,16 +122,20 @@ class MainActivity : AppCompatActivity(),
 
         binding.layoutIncomingTalk.visibility = View.GONE
 
-        // Receiver-id field gates both PTT buttons.
+        // Receiver-id field gates all PTT buttons.
         binding.editReceiverId.addTextChangedListener {
             val receiverId = it.toString()
             binding.voicePingButton.receiverId = receiverId
             binding.wavPingButton.receiverId = receiverId
             binding.voicePingButton.setButtonEnabled(receiverId.isNotBlank())
             binding.wavPingButton.setButtonEnabled(receiverId.isNotBlank())
+            binding.buttonVideoPtt.isEnabled = receiverId.isNotBlank()
         }
 
         wirePttButtons()
+        wireVideoPttButton()
+        wireIncomingVideoSurface()
+        VoicePing.setIncomingVideoListener(incomingVideoListener)
 
         // The KPI logger is the SDK-side singleton listener (registered in
         // VoicePingClientApp) so we never miss a connection/PTT event. We
@@ -133,6 +150,7 @@ class MainActivity : AppCompatActivity(),
         binding.wavPingButton.channelType = ChannelType.PRIVATE
         binding.voicePingButton.setButtonEnabled(false)
         binding.wavPingButton.setButtonEnabled(false)
+        binding.buttonVideoPtt.isEnabled = false
         binding.wavPingButton.wavFile = File(filesDir, "test.wav")
 
         // Connect on first launch, if not already connected.
@@ -157,11 +175,11 @@ class MainActivity : AppCompatActivity(),
 
     override fun onDestroy() {
         super.onDestroy()
-        // Unregister from the KPI logger fan-out — the KPI logger itself
-        // remains attached to the SDK so background events keep being logged.
         kpi?.removeConnectionStateListener(this)
         kpi?.removeIncomingTalkListener(this)
         kpi?.removeFrameHook(amplitudeFrameHook)
+        VoicePing.setIncomingVideoListener(null)
+        if (isVideoTalking) VoicePing.stopVideoTalking()
         releaseActiveEffects()
         toast?.cancel()
         toast = null
@@ -206,6 +224,137 @@ class MainActivity : AppCompatActivity(),
                 if (currentReceiverId().isEmpty()) {
                     binding.editReceiverId.error = getString(R.string.cannot_be_blank)
                 }
+            }
+        }
+    }
+
+    // ─── Video PTT button ─────────────────────────────────────────────────
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun wireVideoPttButton() {
+        binding.buttonVideoPtt.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (!hasCameraPermission()) {
+                        requestCameraPermission()
+                    } else {
+                        startVideoTalking()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    stopVideoTalking()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun wireIncomingVideoSurface() {
+        binding.surfaceIncomingVideo.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                incomingVideoSurface = holder.surface
+                videoSurfaceLatch?.countDown()
+            }
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                incomingVideoSurface = null
+            }
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {}
+        })
+    }
+
+    private fun startVideoTalking() {
+        val receiverId = currentReceiverId()
+        if (receiverId.isBlank()) {
+            binding.editReceiverId.error = getString(R.string.cannot_be_blank)
+            return
+        }
+        isVideoTalking = true
+        binding.buttonVideoPtt.text = "Sending Video…"
+        log("startVideoTalking, receiver: $receiverId, channelType: $channelType")
+        VoicePing.startVideoTalking(receiverId, channelType, object : OutgoingVideoCallback {
+            override fun onOutgoingVideoStarted() {
+                log("onOutgoingVideoStarted")
+            }
+            override fun onOutgoingVideoStopped(isTooShort: Boolean, isTooLong: Boolean) {
+                log("onOutgoingVideoStopped, isTooShort=$isTooShort, isTooLong=$isTooLong")
+                runOnUiThread { binding.buttonVideoPtt.text = getString(R.string.hold_for_video_ptt) }
+                isVideoTalking = false
+            }
+            override fun onOutgoingVideoError(e: VoicePingException) {
+                log("onOutgoingVideoError: ${e.message}")
+                runOnUiThread {
+                    binding.buttonVideoPtt.text = getString(R.string.hold_for_video_ptt)
+                    showToast("Video PTT error: ${e.message}")
+                }
+                isVideoTalking = false
+            }
+        })
+    }
+
+    private fun stopVideoTalking() {
+        if (!isVideoTalking) return
+        log("stopVideoTalking")
+        VoicePing.stopVideoTalking()
+    }
+
+    // ─── IncomingVideoListener ────────────────────────────────────────────
+
+    private val incomingVideoListener = object : IncomingVideoListener {
+        override fun onIncomingVideoStarted(channel: Channel, activeChannels: List<Channel>): Surface? {
+            log("onIncomingVideoStarted, channel: $channel")
+            val latch = CountDownLatch(1)
+            videoSurfaceLatch = latch
+            runOnUiThread {
+                binding.layoutIncomingVideo.visibility = View.VISIBLE
+                binding.textIncomingVideoSenderId.text = channel.pureSenderId
+                // If the surface is already valid from a previous session, release immediately.
+                if (incomingVideoSurface?.isValid == true) latch.countDown()
+            }
+            latch.await(2, TimeUnit.SECONDS)
+            videoSurfaceLatch = null
+            return incomingVideoSurface?.takeIf { it.isValid }
+        }
+
+        override fun onIncomingVideoStopped(channel: Channel, activeChannels: List<Channel>) {
+            log("onIncomingVideoStopped, channel: $channel")
+            if (activeChannels.isEmpty()) {
+                runOnUiThread { binding.layoutIncomingVideo.visibility = View.GONE }
+            }
+        }
+
+        override fun onIncomingVideoError(e: VoicePingException) {
+            log("onIncomingVideoError: ${e.message}")
+            runOnUiThread { binding.layoutIncomingVideo.visibility = View.GONE }
+        }
+    }
+
+    // ─── Camera permission ────────────────────────────────────────────────
+
+    private fun hasCameraPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun requestCameraPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.CAMERA),
+            RC_CAMERA
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == RC_CAMERA) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                startVideoTalking()
+            } else {
+                showToast("Camera permission required for video PTT")
             }
         }
     }
@@ -484,6 +633,7 @@ class MainActivity : AppCompatActivity(),
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val RC_CAMERA = 1001
         // Loudness +30 dB = 3000 millibels. The original code used 300.
         // Keep the original value to preserve user-perceived loudness.
         private const val LOUDNESS_GAIN_MILLIBELS = 300
