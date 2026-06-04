@@ -1,32 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="#1A1A1A"
+    android:orientation="vertical">
 
-    <!-- Camera preview -->
-    <TextureView
-        android:id="@+id/texture_preview"
+    <!-- Camera preview container — height is set in code to match native aspect ratio -->
+    <FrameLayout
+        android:id="@+id/preview_container"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
-
-    <!-- Switch-camera button (top-right) -->
-    <Button
-        android:id="@+id/button_switch_camera"
-        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_margin="12dp"
-        android:text="⇄ Front"
-        android:backgroundTint="#88000000"
-        android:textColor="@android:color/white" />
+        android:background="#000000">
 
-    <!-- Bottom controls -->
+        <TextureView
+            android:id="@+id/texture_preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <!-- Switch-camera button overlaid on preview, top-right -->
+        <Button
+            android:id="@+id/button_switch_camera"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_margin="8dp"
+            android:backgroundTint="#88000000"
+            android:text="⇄ Front"
+            android:textColor="@android:color/white"
+            android:textSize="12sp" />
+
+    </FrameLayout>
+
+    <!-- Controls below the preview -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:background="#CC000000"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
         android:orientation="vertical"
         android:padding="16dp">
 
@@ -34,8 +44,7 @@
             android:id="@+id/text_video_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="16dp"
             android:textColor="#FF4444"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -48,4 +57,4 @@
 
     </LinearLayout>
 
-</FrameLayout>
+</LinearLayout>

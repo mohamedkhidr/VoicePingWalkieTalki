@@ -82,6 +82,7 @@ class VideoPttActivity : AppCompatActivity() {
     private val surfaceTextureListener = object : TextureView.SurfaceTextureListener {
         override fun onSurfaceTextureAvailable(texture: SurfaceTexture, w: Int, h: Int) {
             texture.setDefaultBufferSize(PREVIEW_WIDTH, PREVIEW_HEIGHT)
+            applyNativeAspectRatio(w)
             previewSurface = Surface(texture)
             openCamera()
         }
@@ -91,6 +92,14 @@ class VideoPttActivity : AppCompatActivity() {
             return true
         }
         override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+    }
+
+    /** Resize the TextureView so it shows the camera at its native aspect ratio. */
+    private fun applyNativeAspectRatio(viewWidth: Int) {
+        val w = if (viewWidth > 0) viewWidth else resources.displayMetrics.widthPixels
+        val nativeHeight = w * PREVIEW_HEIGHT / PREVIEW_WIDTH   // e.g. 640×480 → 4:3
+        binding.texturePreview.layoutParams =
+            binding.texturePreview.layoutParams.apply { height = nativeHeight }
     }
 
     @SuppressLint("MissingPermission")
