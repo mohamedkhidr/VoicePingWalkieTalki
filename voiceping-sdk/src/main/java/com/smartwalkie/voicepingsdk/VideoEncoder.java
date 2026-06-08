@@ -60,10 +60,6 @@ class VideoEncoder {
 
     @SuppressLint("MissingPermission")
     void start(FrameCallback callback) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            callback.onError(new UnsupportedOperationException("Video PTT requires API 21+"));
-            return;
-        }
         mCallback = callback;
         mRunning = true;
 

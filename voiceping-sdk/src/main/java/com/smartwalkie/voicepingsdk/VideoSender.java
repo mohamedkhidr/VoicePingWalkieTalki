@@ -1,5 +1,7 @@
 package com.smartwalkie.voicepingsdk;
 
+import android.util.Log;
+
 class VideoSender {
 
     private final Connection mConnection;

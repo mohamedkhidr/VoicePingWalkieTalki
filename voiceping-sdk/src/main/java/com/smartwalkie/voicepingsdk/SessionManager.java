@@ -333,6 +333,7 @@ public class SessionManager implements OutgoingAudioListener{
         mChannelType = channelType;
         mOutgoingVideoCallback = callback;
         mIsVideoSession = true;
+        Log.i("onMessageReceived", mIsVideoSession+"");
         mIsRecording = true;
 
         VideoParam param = mVideoParam != null ? mVideoParam : new VideoParam.Builder().build();
@@ -393,6 +394,7 @@ public class SessionManager implements OutgoingAudioListener{
     private void stopVideoEncoder() {
         mIsRecording = false;
         mIsVideoSession = false;
+        Log.i("onMessageReceived", mIsVideoSession+"");
         if (mVideoEncoder != null) {
             mVideoEncoder.stop();
             mVideoEncoder = null;
@@ -419,6 +421,7 @@ public class SessionManager implements OutgoingAudioListener{
         mChannelType = channelType;
         mOutgoingVideoCallback = callback;
         mIsVideoSession = true;
+        Log.i("onMessageReceived", mIsVideoSession+"");
         mIsRecording = true;
         mVideoSender = new VideoSender(mConnection, mUserId, receiverId, channelType);
 
@@ -438,6 +441,7 @@ public class SessionManager implements OutgoingAudioListener{
 
     /** Send an encoded H.264 frame over the active video session. */
     public void sendVideoFrame(byte[] data, boolean isKeyFrame) {
+        Log.i("onMessageReceived", mIsVideoSession+" ====");
         if (mVideoSender != null && mIsVideoSession) {
             mVideoSender.send(data, isKeyFrame);
         }
@@ -448,6 +452,7 @@ public class SessionManager implements OutgoingAudioListener{
         mBackgroundHandler.removeCallbacks(mStartVideoTalkingRunner);
         mIsRecording = false;
         mIsVideoSession = false;
+        Log.i("onMessageReceived", mIsVideoSession+"");
 
         if (mOutgoingVideoCallback != null) {
             long duration = System.currentTimeMillis() - mVideoStartTime;

@@ -53,9 +53,7 @@ public class AudioSender {
     public void flush() {
         byte[] accumulated = mOutputStream.toByteArray();
         if (accumulated.length == 0) return;
-        Message message = MessageHelper.createAudioMessage(
-                mUserId, mReceiverId, mChannelType,
-                accumulated, accumulated.length);
+        Message message = MessageHelper.createAudioMessage(mUserId, mReceiverId, mChannelType, accumulated, accumulated.length);
         if (message == null) { reset(); return; }
 
         try {

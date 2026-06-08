@@ -213,16 +213,8 @@ class VideoPttActivity : AppCompatActivity() {
         encoder = enc
         encoderSurface = encSurface
 
-        // 2. Recreate capture session targeting both preview + encoder
-        try { captureSession?.stopRepeating(); captureSession?.close() } catch (_: Exception) {}
-        startCaptureSession(encSurface)
-
-        // 3. Start draining encoder output → VoicePing.sendVideoFrame()
-        spsBuffer = null
-        encodingRunning = true
-        encoderThread = Thread(::drainEncoder, "VideoPtt-Encode").also { it.start() }
-
-        // 4. Signal the SDK
+        // 2. Signal the SDK first — sets mIsVideoSession=true and mVideoSender synchronously
+        //    so sendVideoFrame() calls from the encoder thread are not dropped.
         isVideoTalking = true
         runOnUiThread {
             binding.buttonVideoPtt.text = "● Sending…"
@@ -243,6 +235,15 @@ class VideoPttActivity : AppCompatActivity() {
                 }
             }
         })
+
+        // 3. Recreate capture session targeting both preview + encoder
+        try { captureSession?.stopRepeating(); captureSession?.close() } catch (_: Exception) {}
+        startCaptureSession(encSurface)
+
+        // 4. Start draining encoder output → VoicePing.sendVideoFrame()
+        spsBuffer = null
+        encodingRunning = true
+        encoderThread = Thread(::drainEncoder, "VideoPtt-Encode").also { it.start() }
     }
 
     private fun stopVideoTalking() {
