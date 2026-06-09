@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.audiofx.BassBoost
 import android.media.audiofx.LoudnessEnhancer
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
@@ -20,12 +21,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.widget.addTextChangedListener
 import com.smartwalkie.voicepingdemo.databinding.ActivityMainBinding
 import com.smartwalkie.voicepingdemo.kpi.PttKpiLogger
-import com.smartwalkie.voicepingdemo.net.NetworkMonitor
 import com.smartwalkie.voicepingsdk.ConnectionState
 import com.smartwalkie.voicepingsdk.VoicePing
 import com.smartwalkie.voicepingsdk.VoicePingButton
 import com.smartwalkie.voicepingsdk.VoicePingWavButton
-import com.smartwalkie.voicepingsdk.callback.ConnectCallback
 import com.smartwalkie.voicepingsdk.exception.ErrorCode
 import com.smartwalkie.voicepingsdk.exception.VoicePingException
 import com.smartwalkie.voicepingsdk.listener.AudioMetaData
@@ -65,12 +64,6 @@ class MainActivity : AppCompatActivity(),
     private var amplitudeScratch: ShortArray = ShortArray(0)
     private var lastUiAmplitudeUpdateMs: Long = 0L
 
-    // Network state. Reconnect-on-network-return only fires after the first
-    // observed loss — i.e. we never spam the SDK with extra connect calls
-    // while it's already healthy.
-    private lateinit var networkMonitor: NetworkMonitor
-    @Volatile private var sawNetworkLoss: Boolean = false
-
     // Incoming video surface tracking
     @Volatile private var incomingVideoSurface: Surface? = null
     @Volatile private var videoSurfaceLatch: CountDownLatch? = null
@@ -87,13 +80,6 @@ class MainActivity : AppCompatActivity(),
         val company = MyPrefs.company.orEmpty()
         val serverUrl = MyPrefs.serverUrl.orEmpty()
         if (userId.isBlank() || company.isBlank() || serverUrl.isBlank()) {
-            finish(); return
-        }
-
-        // Hard requirement for PTT — the recorder will fail silently without it.
-        if (!hasRecordAudioPermission()) {
-            showToast("Microphone permission missing — please re-login.")
-            startActivity(Intent(this, LoginActivity::class.java))
             finish(); return
         }
 
@@ -119,14 +105,23 @@ class MainActivity : AppCompatActivity(),
 
         binding.layoutIncomingTalk.visibility = View.GONE
 
-        // Receiver-id field gates all PTT buttons.
+        // Receiver-id field gates all PTT buttons. Mic permission also required for audio PTT.
         binding.editReceiverId.addTextChangedListener {
             val receiverId = it.toString()
             binding.voicePingButton.receiverId = receiverId
             binding.wavPingButton.receiverId = receiverId
-            binding.voicePingButton.setButtonEnabled(receiverId.isNotBlank())
-            binding.wavPingButton.setButtonEnabled(receiverId.isNotBlank())
+            val hasMic = hasRecordAudioPermission()
+            binding.voicePingButton.setButtonEnabled(receiverId.isNotBlank() && hasMic)
+            binding.wavPingButton.setButtonEnabled(receiverId.isNotBlank() && hasMic)
             binding.buttonVideoPtt.isEnabled = receiverId.isNotBlank()
+        }
+
+        if (!hasRecordAudioPermission()) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                RC_RECORD_AUDIO
+            )
         }
 
         wirePttButtons()
@@ -150,24 +145,12 @@ class MainActivity : AppCompatActivity(),
         binding.buttonVideoPtt.isEnabled = false
         binding.wavPingButton.wavFile = File(filesDir, "test.wav")
 
-        // Connect on first launch, if not already connected.
-        if (VoicePing.getConnectionState() == ConnectionState.DISCONNECTED) {
-            connectVoicePing(serverUrl, userId, company)
-        }
+        // Start the foreground service which owns the connection and network monitor.
+        // Safe to call when already running — the service skips connect if already connected.
+        VoicePingConnectionService.start(this, userId, company, serverUrl)
 
-        // Network monitor — surfaces transport changes to the user and pokes
-        // the SDK to reconnect when network returns.
-        networkMonitor = NetworkMonitor(this, networkListener)
-    }
-
-    override fun onStart() {
-        super.onStart()
-        networkMonitor.start()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        networkMonitor.stop()
+        // Android 13+ requires POST_NOTIFICATIONS at runtime for the service notification.
+        requestNotificationPermissionIfNeeded()
     }
 
     override fun onDestroy() {
@@ -305,11 +288,29 @@ class MainActivity : AppCompatActivity(),
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == RC_CAMERA) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-                VideoPttActivity.start(this, currentReceiverId(), channelType)
-            } else {
-                showToast("Camera permission required for video PTT")
+        when (requestCode) {
+            RC_RECORD_AUDIO -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    // Re-evaluate button state now that mic is available.
+                    val receiverId = currentReceiverId()
+                    binding.voicePingButton.setButtonEnabled(receiverId.isNotBlank())
+                    binding.wavPingButton.setButtonEnabled(receiverId.isNotBlank())
+                } else {
+                    showToast("Microphone permission is required for PTT")
+                }
+            }
+            RC_CAMERA -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    VideoPttActivity.start(this, currentReceiverId(), channelType)
+                } else {
+                    showToast("Camera permission required for video PTT")
+                }
+            }
+            RC_NOTIFICATIONS -> {
+                // Service notification will be silent if denied — connection still works.
+                if (grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
+                    showToast("Notification permission denied — no status bar indicator")
+                }
             }
         }
     }
@@ -318,15 +319,6 @@ class MainActivity : AppCompatActivity(),
         binding.editReceiverId.text.toString().trim()
 
     // ─── Connection ───────────────────────────────────────────────────────
-
-    private fun connectVoicePing(serverUrl: String, userId: String, company: String) {
-        VoicePing.connect(serverUrl, userId, company, object : ConnectCallback {
-            override fun onConnected() = Unit
-            override fun onFailed(exception: VoicePingException) {
-                Log.w(TAG, "VoicePing.connect failed: ${exception.message}")
-            }
-        })
-    }
 
     private fun initToolbar(userId: String, company: String) {
         supportActionBar?.title = "User ID: $userId"
@@ -342,38 +334,6 @@ class MainActivity : AppCompatActivity(),
             ConnectionState.CONNECTED    -> R.color.green
         }
         binding.textConnectionState.setTextColor(ContextCompat.getColor(this, colorResId))
-    }
-
-    // ─── Network monitor callbacks ────────────────────────────────────────
-
-    private val networkListener = object : NetworkMonitor.Listener {
-        override fun onNetworkAvailable(transport: NetworkMonitor.Transport) {
-            log("network available: $transport")
-            // Only force a reconnect if we previously saw a loss.
-            if (sawNetworkLoss && VoicePing.getConnectionState() == ConnectionState.DISCONNECTED) {
-                val userId = MyPrefs.userId.orEmpty()
-                val company = MyPrefs.company.orEmpty()
-                val serverUrl = MyPrefs.serverUrl.orEmpty()
-                if (userId.isNotBlank() && company.isNotBlank() && serverUrl.isNotBlank()) {
-                    log("triggering reconnect after network return")
-                    connectVoicePing(serverUrl, userId, company)
-                }
-            }
-            sawNetworkLoss = false
-        }
-
-        override fun onNetworkLost() {
-            sawNetworkLoss = true
-            runOnUiThread {
-                showToast("Network lost — PTT unavailable")
-            }
-        }
-
-        override fun onTransportChanged(transport: NetworkMonitor.Transport) {
-            runOnUiThread {
-                showToast("Network: $transport")
-            }
-        }
     }
 
     // ─── Menu / spinner ───────────────────────────────────────────────────
@@ -574,6 +534,19 @@ class MainActivity : AppCompatActivity(),
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                RC_NOTIFICATIONS
+            )
+        }
+    }
+
     private fun showToast(message: String?) {
         if (message == null) return
         runOnUiThread {
@@ -588,7 +561,9 @@ class MainActivity : AppCompatActivity(),
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val RC_RECORD_AUDIO = 1000
         private const val RC_CAMERA = 1001
+        private const val RC_NOTIFICATIONS = 1002
         // Loudness +30 dB = 3000 millibels. The original code used 300.
         // Keep the original value to preserve user-perceived loudness.
         private const val LOUDNESS_GAIN_MILLIBELS = 300

@@ -12,11 +12,11 @@ def getGitHash = { ->
 }
 
 android {
-    compileSdkVersion 30
+    compileSdkVersion 36
     defaultConfig {
         applicationId "com.smartwalkie.voicepingdemo"
-        minSdkVersion 21
-        targetSdkVersion 31
+        minSdkVersion 29
+        targetSdkVersion 33
         versionCode 1
         versionName "1.1"
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
@@ -42,6 +42,7 @@ android {
     buildFeatures {
         viewBinding true
     }
+    namespace 'com.smartwalkie.voicepingdemo'
 }
 
 repositories {

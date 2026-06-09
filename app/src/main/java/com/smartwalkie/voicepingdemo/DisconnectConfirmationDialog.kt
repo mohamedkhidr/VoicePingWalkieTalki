@@ -13,6 +13,7 @@ class DisconnectConfirmationDialog(activity: Activity, listener: Listener) {
         .setPositiveButton(android.R.string.ok) { _, _ ->
             VoicePing.disconnect(object : DisconnectCallback {
                 override fun onDisconnected() {
+                    VoicePingConnectionService.stop(activity)
                     if (!activity.isFinishing) {
                         VoicePing.unmuteAll()
                         MyPrefs.clear()
