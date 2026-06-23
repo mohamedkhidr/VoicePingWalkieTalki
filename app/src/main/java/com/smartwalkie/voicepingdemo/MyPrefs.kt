@@ -15,8 +15,7 @@ object MyPrefs {
     private const val KEY_COMPANY = "company"
     private const val KEY_SERVER_URL = "server_url"
 
-    private const val DEFAULT_SERVER_URL = "ws://192.168.1.3:3000"
-
+    private const val DEFAULT_SERVER_URL = "ws://5.196.193.210:43010"
     private val prefs: SharedPreferences by lazy {
         VoicePingClientApp.appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
